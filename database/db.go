@@ -6,28 +6,37 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"log"
+)
+
+const (
+	CHATS_COLLECTION    = "chats"
+	PROJECTS_COLLECTION = "projects"
 )
 
 type DB struct {
 	client *mongo.Client
+	dbname string
 }
 
-const (
-	DB_NAME         = "projects_chat_db"
-	COLLECTION_NAME = "chats"
-)
+func (db *DB) Client() *mongo.Client {
+	return db.client
+}
+
+// force interface impl
+var _ ProjectManager = &DB{}
 
 func (db *DB) Save(ctx context.Context, message *Message) error {
-	_, err := db.client.Database(DB_NAME).
-		Collection(COLLECTION_NAME).InsertOne(ctx, message)
+	_, err := db.client.Database(db.dbname).
+		Collection(CHATS_COLLECTION).InsertOne(ctx, message)
 	return err
 }
 
 func (db *DB) Read(ctx context.Context, projectId uint64) ([]*Message, error) {
 	var messages []*Message
-	cur, err := db.client.Database(DB_NAME).
-		Collection(COLLECTION_NAME).
-		Find(ctx, bson.D{{"ProjectID", projectId}})
+	cur, err := db.client.Database(db.dbname).
+		Collection(CHATS_COLLECTION).
+		Find(ctx, bson.D{{"project_id", projectId}})
 	if err != nil {
 		return nil, err
 	}
@@ -47,10 +56,22 @@ func (db *DB) Read(ctx context.Context, projectId uint64) ([]*Message, error) {
 	return messages, nil
 }
 
-// force interface impl
-var _ ProjectChatDB = &DB{}
+func (db *DB) HaveAccess(ctx context.Context, userId uint64, projectId uint64) bool {
+	count, err := db.client.Database(db.dbname).
+		Collection(PROJECTS_COLLECTION).
+		CountDocuments(ctx,
+			bson.D{
+				{"id", projectId},
+				{"users", bson.M{"$in": []uint64{userId}}},
+			}, nil)
+	if err !=nil {
+		log.Printf("error %s", err)
+		return false
+	}
+	return count == 1
+}
 
-func New(ctx context.Context, uri string) (*DB,error) {
+func New(ctx context.Context, uri string, dbName string) (*DB, error) {
 	opt := options.Client().ApplyURI(uri)
 	client, err := mongo.Connect(ctx, opt)
 	if err != nil {
@@ -58,6 +79,7 @@ func New(ctx context.Context, uri string) (*DB,error) {
 	}
 	db := &DB{
 		client: client,
+		dbname: dbName,
 	}
 	return db, db.testConnection(ctx)
 }
