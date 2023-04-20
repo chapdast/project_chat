@@ -28,7 +28,7 @@ func main() {
 		log.Fatalln("database uri is missing, set DATABASE_NAME env var")
 	}
 	r := mux.NewRouter()
-	db, err := database.New(ctx, dbURI,dbName)
+	db, err := database.New(ctx, dbURI, dbName)
 	if err != nil {
 		log.Fatalf("error on db, %s\n", err)
 	}
@@ -37,10 +37,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("error create server, %s", err)
 	}
-	projectMan.RegisterHandlers(ctx, r);
+	projectMan.RegisterHandlers(ctx, r)
 
 	log.Printf("running server on port %s", port)
-	if err:=http.ListenAndServe(port, r); err !=nil {
+	if err := http.ListenAndServe(port, r); err != nil {
 		log.Fatalf("failed to server on %s, err: %s", port, err)
 	}
 }
