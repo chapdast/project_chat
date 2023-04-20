@@ -7,10 +7,9 @@ import (
 	"github.com/chapdast/project_chat/database"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
-	"strconv"
-
 	"log"
 	"net/http"
+	"strconv"
 )
 
 type ProjectChatHandler struct {
@@ -27,7 +26,7 @@ func New(db database.ProjectManager) (*ProjectChatHandler, error) {
 }
 
 func (pch *ProjectChatHandler) RegisterHandlers(ctx context.Context, r *mux.Router) {
-	r.HandleFunc("/projects/{project_id:[0-9]+}/chats", pch.socketHandler(ctx))
+	r.HandleFunc("/projects/{project_id:[0-9]+}/chats", pch.chats(ctx))
 	r.HandleFunc("/projects/{project_id:[0-9]+}/messages", pch.messages(ctx))
 }
 
@@ -46,7 +45,7 @@ func (pch *ProjectChatHandler) getProjectId(r *http.Request) (uint64, error) {
 func (pch *ProjectChatHandler) checkUserAccess(ctx context.Context, userId uint64, projectId uint64) bool {
 	return pch.db.HaveAccess(ctx, userId, projectId)
 }
-func (pch *ProjectChatHandler) socketHandler(ctx context.Context) http.HandlerFunc {
+func (pch *ProjectChatHandler) chats(ctx context.Context) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -55,12 +54,11 @@ func (pch *ProjectChatHandler) socketHandler(ctx context.Context) http.HandlerFu
 		}
 		defer conn.Close()
 		for {
-			messageType, data, err := conn.ReadMessage()
+			_, data, err := conn.ReadMessage()
 			if err != nil {
 				log.Printf("error reading data, %s\n", err)
 				break
 			}
-			log.Printf("recieved: %s", data)
 			var message database.Message
 			if err := json.Unmarshal(data, &message); err != nil {
 				log.Printf("error unmarshalling message, %s", err)
@@ -81,7 +79,7 @@ func (pch *ProjectChatHandler) socketHandler(ctx context.Context) http.HandlerFu
 				log.Printf("error saving message, %s", err)
 				break
 			}
-			err = conn.WriteMessage(messageType, data)
+			err = conn.WriteJSON(message)
 			if err != nil {
 				log.Printf("error on write: %s\n", err)
 				break
@@ -94,33 +92,41 @@ func (pch *ProjectChatHandler) messages(ctx context.Context) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
-			log.Printf("error upgrade connetion, %s\n", err)
+			log.Printf("error upgrade conection, %s\n", err)
 			return
 		}
 		defer conn.Close()
 		for {
-			_, data, err := conn.ReadMessage()
+			mt, _, err := conn.ReadMessage()
+			if mt == websocket.CloseGoingAway {
+				if err := conn.Close(); err != nil {
+					log.Printf("error closing conn, %s\n", err)
+				}
+			}
 			if err != nil {
 				log.Printf("error reading data, %s\n", err)
 				break
 			}
-			log.Printf("recieved: %s", data)
 			projectId, err := pch.getProjectId(r)
+
 			if err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				return
+				log.Printf("error get project id, %s\n", err)
+				break
 			}
 			messages, err := pch.db.Read(ctx, projectId)
 			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				return
+				log.Printf("error get project, %s\n", err)
+				break
 			}
-			w.Header().Set("ContentType", "application/json")
-			for _, m := range messages {
-				if err := conn.WriteJSON(m); err != nil {
-					log.Printf("error on write: %s\n", err)
-				}
+
+			d, err := json.Marshal(messages)
+			if err != nil {
+				log.Printf("error marshaling data, %s\n", err)
 			}
+			if err := conn.WriteMessage(websocket.TextMessage, d); err != nil {
+				log.Printf("error on write: %s\n", err)
+			}
+
 		}
 
 	}

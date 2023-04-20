@@ -50,7 +50,7 @@ func (db *DB) Read(ctx context.Context, projectId uint64) ([]*Message, error) {
 		messages = append(messages, &message)
 	}
 
-	if err := cur.Err(); err != nil {
+	if cur.Err() == mongo.ErrNoDocuments {
 		return nil, err
 	}
 	return messages, nil
